@@ -35,3 +35,39 @@ Then connect one or more clients (use the port printed by server):
 - Uses `poll()` on both `stdin` and the socket simultaneously
 - This means server messages (e.g. someone else won) are shown immediately, even while the user is typing
 - Prompt is shown only after receiving a server response
+
+---
+
+# Lab 2 — HTTP client
+
+Minimal HTTP/1.1 client written in C. Connects to a server, sends a GET request, and saves the response body to a file. Works with any file type (HTML, JPG, PNG, etc).
+
+## Files
+
+- `httpclient.c` — HTTP GET client
+
+## How to build
+
+```
+gcc httpclient.c -o httpclient
+```
+
+## How to run
+
+./httpclient [domain] [file]
+
+Example - download an image from a local Python server:
+
+```
+python3 -m http.server 80
+
+./httpclient localhost:80 image.jpg
+```
+
+## How it works
+
+- Uses `getaddrinfo()` to resolve hostname to IP (DNS lookup)
+- Builds a raw HTTP/1.1 GET request and sends it over a TCP socket
+- Receives the full response into a dynamically growing buffer
+- Locates the end of headers by searching for `\r\n\r\n`
+- Writes everything after the headers (the body) to a file in binary mode
