@@ -23,6 +23,12 @@ void init_network()
             routers[i].dist[j] = INFINITY;
             routers[i].next_hop[j] = -1;
         }
+
+        // set all neighbor ids to -1, since memset made it 0 - a valid router id
+        for (int j = 0; j < MAX_NEIGHBORS; ++j)
+        {
+            routers[i].neighbors[j].id = -1;
+        }
     }
 }
 
@@ -135,6 +141,25 @@ void disconnect_routers(int a, int b)
             routers[b].dist[a] = INFINITY;
             routers[b].next_hop[a] = -1;
             break;
+        }
+    }
+
+    // any hop from a through b is terminated
+    for (int i = 0; i < MAX_ROUTERS; ++i)
+    {
+        if (routers[a].next_hop[i] == b)
+        {
+            routers[a].next_hop[i] = -1;
+            routers[a].dist[i] = INFINITY;
+        }
+    }
+    // same for b
+    for (int i = 0; i < MAX_ROUTERS; ++i)
+    {
+        if (routers[b].next_hop[i] == a)
+        {
+            routers[b].next_hop[i] = -1;
+            routers[b].dist[i] = INFINITY;
         }
     }
 }

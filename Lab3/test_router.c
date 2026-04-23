@@ -198,6 +198,94 @@ void test_remove_router()
     }
 }
 
+void test_reroute_after_disconnect()
+{
+    TEST("reroute after disconnect: 0-1-2-3-4 topology");
+    init_network();
+
+    int r0 = create_router(5001);
+    int r1 = create_router(5002);
+    int r2 = create_router(5003);
+    int r3 = create_router(5004);
+    int r4 = create_router(5005);
+
+    routers[r0].isActive = 1;
+    routers[r1].isActive = 1;
+    routers[r2].isActive = 1;
+    routers[r3].isActive = 1;
+    routers[r4].isActive = 1;
+
+    /* Topology:
+     * 0 --- 1 --- 2
+     *       |   /
+     *       3 --
+     *       |
+     *       4
+     */
+    connect_routers(r0, r1);
+    connect_routers(r1, r2);
+    connect_routers(r1, r3);
+    connect_routers(r3, r2);
+    connect_routers(r3, r4);
+
+    /* Simulate broadcasts until convergence */
+    for (int round = 0; round < MAX_ROUTERS; round++)
+    {
+        for (int i = 0; i < MAX_ROUTERS; i++)
+        {
+            if (!routers[i].isActive)
+                continue;
+            for (int j = 0; j < MAX_NEIGHBORS; j++)
+            {
+                int nb = routers[i].neighbors[j].id;
+                if (nb == -1)
+                    continue;
+                update_distances(nb, i, routers[i].dist);
+            }
+        }
+    }
+
+    /* Disconnect 1 -- 3 */
+    disconnect_routers(r1, r3);
+
+    /* Simulate broadcasts again after disconnect */
+    for (int round = 0; round < MAX_ROUTERS; round++)
+    {
+        for (int i = 0; i < MAX_ROUTERS; i++)
+        {
+            if (!routers[i].isActive)
+                continue;
+            for (int j = 0; j < MAX_NEIGHBORS; j++)
+            {
+                int nb = routers[i].neighbors[j].id;
+                if (nb == -1)
+                    continue;
+                update_distances(nb, i, routers[i].dist);
+            }
+        }
+    }
+
+    /* After disconnect:
+     * 4 -> 3 -> 2 -> 1 -> 0 = dist 4, next_hop = 3
+     * 3 -> 2 -> 1 -> 0      = dist 3, next_hop = 2
+     */
+    int r4_to_r0_ok = routers[r4].dist[r0] == 4 && routers[r4].next_hop[r0] == r3;
+    int r3_to_r0_ok = routers[r3].dist[r0] == 3 && routers[r3].next_hop[r0] == r2;
+
+    if (r4_to_r0_ok && r3_to_r0_ok)
+    {
+        PASS();
+    }
+    else
+    {
+        printf("\n    r4->r0: dist=%d next_hop=%d (expected dist=4 next_hop=%d)\n",
+               routers[r4].dist[r0], routers[r4].next_hop[r0], r3);
+        printf("    r3->r0: dist=%d next_hop=%d (expected dist=3 next_hop=%d)\n",
+               routers[r3].dist[r0], routers[r3].next_hop[r0], r2);
+        FAIL("rerouting after disconnect failed");
+    }
+}
+
 int main(void)
 {
     printf("=== Router Unit Tests ===\n\n");
@@ -209,6 +297,7 @@ int main(void)
     test_update_distances();
     test_is_port_available();
     test_remove_router();
+    test_reroute_after_disconnect();
 
     printf("\n=== Results: %d test(s) failed ===\n", errors);
     return errors;
