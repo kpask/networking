@@ -3,26 +3,100 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/poll.h>
 #include <netdb.h>
 
 #define BUFFLEN 1024
+
+void parse_url(const char *url, char *host, char *port, char *path)
+{
+    // skip "http://"
+    const char *start = strstr(url, "://");
+    start = start ? start + 3 : url;
+
+    // check for port — find colon before first slash
+    const char *colon = strchr(start, ':');
+    const char *slash = strchr(start, '/');
+
+    if (colon && (!slash || colon < slash))
+    {
+        // host:port/path
+        strncpy(host, start, colon - start);
+        host[colon - start] = '\0';
+
+        const char *port_end = slash ? slash : colon + strlen(colon);
+        strncpy(port, colon + 1, port_end - (colon + 1));
+        port[port_end - (colon + 1)] = '\0';
+    }
+    else
+    {
+        // no port, default 80
+        if (slash)
+        {
+            strncpy(host, start, slash - start);
+            host[slash - start] = '\0';
+        }
+        else
+        {
+            strcpy(host, start);
+        }
+        strcpy(port, "80");
+    }
+
+    // path after first slash
+    if (slash)
+    {
+        strcpy(path, slash + 1);
+    }
+
+    else
+    {
+        path[0] = '\0';
+    }
+
+    // remove trailing slash
+    int path_len = strlen(path);
+    if (path_len > 0 && path[path_len - 1] == '/')
+    {
+        path[path_len - 1] = '\0';
+    }
+}
 
 int main(int argc, char *argv[])
 {
     struct addrinfo hints, *res;
 
-    if (argc != 3)
+    if (argc != 2)
     {
-        printf("Usage: %s <domain.com> <file>\n", argv[0]);
+        printf("Usage: %s <url>\n", argv[0]);
+        printf("  e.g. %s http://example.com/image.jpg\n", argv[0]);
+        printf("  e.g. %s localhost:8080/file.png\n", argv[0]);
         return 1;
+    }
+
+    if (strncmp(argv[1], "https://", 8) == 0)
+    {
+        fprintf(stderr, "HTTPS not supported\n");
+        return 1;
+    }
+
+    char host[256] = {0};
+    char port[16] = {0};
+    char path[1024] = {0};
+    parse_url(argv[1], host, port, path);
+
+    char *filename = strrchr(path, '/');
+    filename = filename ? filename + 1 : path;
+
+    if (strlen(filename) == 0)
+    {
+        filename = "index.html";
     }
 
     // resolve hostname to IP via DNS
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(argv[1], "80", &hints, &res))
+    if (getaddrinfo(host, port, &hints, &res))
     {
         fprintf(stderr, "getaddrinfo error");
         return 1;
@@ -47,7 +121,8 @@ int main(int argc, char *argv[])
 
     // build and send HTTP GET request
     char request[BUFFLEN];
-    snprintf(request, BUFFLEN, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", argv[2], argv[1]);
+    snprintf(request, BUFFLEN, "GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n", path, host);
+    printf("Sending request:\n%s\n", request);
     send(sock, request, strlen(request), 0);
 
     // receive full response into dynamically growing buffer
@@ -87,6 +162,20 @@ int main(int argc, char *argv[])
     response = tmp;
     response[received] = '\0';
 
+    // after receiving we check if status code is < 400 - successful
+    if (strncmp(response, "HTTP/", 5) == 0)
+    {
+        int status;
+        sscanf(response, "HTTP/%*s %d", &status);
+        if (status >= 400)
+        {
+            printf("Server returned %d\n", status);
+            free(response);
+            close(sock);
+            return 1;
+        }
+    }
+
     // find end of headers — body starts after \r\n\r\n
     char *body = strstr(response, "\r\n\r\n");
     if (!body)
@@ -99,7 +188,7 @@ int main(int argc, char *argv[])
     body += 4;
 
     // write body to file in binary mode to preserve all bytes
-    FILE *fptr = fopen(argv[2], "wb");
+    FILE *fptr = fopen(filename, "wb");
     if (!fptr)
     {
         perror("fopen");
@@ -110,7 +199,7 @@ int main(int argc, char *argv[])
 
     int body_len = received - (body - response);
     fwrite(body, 1, body_len, fptr);
-    printf("Saved %d bytes to %s\n", body_len, argv[2]);
+    printf("Saved %d bytes to %s\n", body_len, filename);
 
     free(response);
     close(sock);
