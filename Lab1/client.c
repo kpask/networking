@@ -15,56 +15,55 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // Create TCP socket
     int port = atoi(argv[2]);
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-
     if (sock < 0)
     {
         perror("socket");
         return 1;
     }
 
-    // set connection for ipv4, network order port
-    struct sockaddr_in server;
-    memset(&server, 0, sizeof(server));
+    // Setup server address
+    struct sockaddr_in server = {0};
     server.sin_family = AF_INET;
     server.sin_port = htons(port);
 
-    // set to binary the connection address
     if (inet_aton(argv[1], &server.sin_addr) == 0)
     {
-        fprintf(stderr, "Invalid IP address\n");
+        fprintf(stderr, "Invalid IP\n");
         return 1;
     }
 
-    // open connection fd to server
+    // Connect to server
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0)
     {
         perror("connect");
         return 1;
     }
 
-    // set up polls, one for user input other for server
+    // Monitor stdin and socket
     struct pollfd pfds[2];
-    pfds[0].fd = STDIN_FILENO; // keyboard
+    pfds[0].fd = STDIN_FILENO;
     pfds[0].events = POLLIN;
-    pfds[1].fd = sock; // server
+    pfds[1].fd = sock;
     pfds[1].events = POLLIN;
 
-    // print and fflush to print bufered stdout
     printf("Guess the number (1-100): ");
     fflush(stdout);
+    char buffer[BUFFLEN];
     while (1)
     {
-        char buffer[BUFFLEN];
+        // Wait for input (user or server)
+        if (poll(pfds, 2, -1) < 0)
+        {
+            perror("poll");
+            break;
+        }
 
-        // poll sockets, check if any occured
-        poll(pfds, 2, -1);
-
-        // server has sent something
+        // Data from server
         if (pfds[1].revents & POLLIN)
         {
-            // check return of recv - sent buffer size
             int n = recv(sock, buffer, BUFFLEN - 1, 0);
             if (n <= 0)
             {
@@ -73,29 +72,35 @@ int main(int argc, char *argv[])
             }
 
             buffer[n] = '\0';
-            printf("%s\n", buffer);
+            printf("%s", buffer);
 
-            // compare check response, if the game has ended, finish the cycle and close connection
-            if (strncmp(buffer, "You guessed", 11) == 0 ||
-                strncmp(buffer, "Someone else", 12) == 0)
+            // Exit if game ended
+            if (strstr(buffer, "You guessed") || strstr(buffer, "Someone else"))
             {
                 break;
             }
 
-            // number is not guessed send prompt to enter again
             printf("Guess the number (1-100): ");
             fflush(stdout);
         }
-        // user entered something
+
+        // User input
         if (pfds[0].revents & POLLIN)
         {
-            // load from system buffer to our buffer
-            fgets(buffer, BUFFLEN, stdin);
-            // send the buffer to the server
-            send(sock, buffer, strlen(buffer), 0);
+            if (!fgets(buffer, BUFFLEN, stdin))
+            {
+                break;
+            }
+
+            if (send(sock, buffer, strlen(buffer), 0) < 0)
+            {
+                perror("send");
+                break;
+            }
         }
     }
 
+    // Close connection
     close(sock);
     return 0;
 }
